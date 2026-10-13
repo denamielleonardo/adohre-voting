@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ADOHRE | Digital Voting Portal</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">A</div>
+      <div>ADOHRE<small>DIGITAL VOTING PORTAL</small></div>
+    </div>
+    <div class="topright">Association of DOH Retired Employees</div>
+  </header>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="side-brand">
+        <div class="logo">A</div>
+        <div>
+          <h2>ADOHRE</h2>
+          <p>Association of DOH Retired Employees</p>
+        </div>
+      </div>
+      <nav class="navitems">
+        <button class="navbtn active" data-nav="portal">&#8962; &nbsp; Voting Portal</button>
+        <button class="navbtn" data-nav="guide">&#9636; &nbsp; Voting Guide</button>
+        <button class="navbtn" data-nav="admin" id="nav-admin" hidden>&#9881; &nbsp; Admin Results</button>
+        <button class="navbtn" id="signout" hidden>&#8617; &nbsp; Sign out</button>
+      </nav>
+      <div class="sidefoot">
+        Honoring service.<br>Strengthening our community.<br><br>
+        <span id="session-email"></span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="welcome">
+        <div class="eyebrow">Member voting experience</div>
+        <h1 id="welcome-title">Your voice. Your association.</h1>
+        <p id="welcome-text"></p>
+      </section>
+      <div class="content" id="app"></div>
+      <div class="footer">ADOHRE DIGITAL VOTING PORTAL</div>
+    </main>
+  </div>
+  <div id="toastroot"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
