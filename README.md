@@ -6,9 +6,9 @@ Anonymous voting with attendance-gated access: whoever staff record on the atten
 
 **Voters** (no email codes, no voter list to prepare):
 
-1. **Attendance.** At the registration desk, staff fill in the **attendance form** on the admin side: the person's name, and their email and/or cellphone number. Recording it makes that person a voter. The only check is for duplicates (the same email or the same cellphone number already recorded). A QR code unique to that person appears.
+1. **Attendance.** At the registration desk, staff fill in the **attendance form** on the admin side: the person's first, middle (optional) and last name, their email and/or cellphone number, and a password of at least 8 characters that the voter will use to sign in. Recording it makes that person a voter. The only check is for duplicates (the same email or the same cellphone number already recorded). A QR code unique to that person appears.
 2. **Scan.** The voter scans the QR with their phone. It opens this site.
-3. **Verify.** They type the **email or cellphone number staff entered for them**. It must match the person the QR was issued to (the check happens on the server; the QR itself carries only a secret token, never the email or number).
+3. **Verify.** They type the **email or cellphone number staff entered for them** and their **password**. It must match the person the QR was issued to (the check happens on the server; the QR itself carries only a secret token, never the email or number).
 4. **Vote.** They stay signed in on that phone until they sign out. They land on **Active polls**.
 
 **Admins** sign in at `<url>#admin` with their email and a password (Supabase Auth). No email is sent, so there is no waiting for a code.

@@ -267,7 +267,12 @@ textarea.input { resize: vertical; font-family: inherit; line-height: 1.5; }
 /* Ballot: a position's header stays under the top bar while its candidates scroll */
 .position-head { position: sticky; top: 70px; z-index: 3; background: #fff; padding: 6px 0 8px;
   margin: 18px 0 6px; border-bottom: 1px solid var(--line); }
-.position-head .sectiontitle { margin: 0; }
+.position-head { background: #eaf2f7; border: 1px solid #cfe0eb; border-left: 5px solid var(--blue);
+  border-radius: 10px; padding: 12px 14px; margin-top: 26px; }
+.position-head .sectiontitle { margin: 0; gap: 12px; }
+.position-head .sectiontitle h3 { font-size: 19px; font-weight: 800; letter-spacing: -.01em; }
+.position-head .sectiontitle span { font-size: 12px; font-weight: 700; color: var(--blue); background: #fff;
+  border: 1px solid #cfe0eb; border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
 .position-head .counter { margin: 8px 0 0; }
 
 /* QR entry, attendance, QR dialog */
@@ -316,8 +321,23 @@ button.scanbox:focus-visible { outline: 3px solid #1265a340; outline-offset: 2px
 .att-scroll { max-height: 560px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
 .att-scroll .poll-card:last-child { margin-bottom: 0; }
 
+/* Name (3 across) and password (2 across) rows */
+.row3, .row2 { display: grid; gap: 12px; }
+.row3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.row2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 480px) { .row3 { grid-template-columns: minmax(0, 1fr); } }
+
+/* Password fields with a Show / Hide button */
+.pw-wrap { position: relative; }
+.pw-wrap .input { padding-right: 64px; }
+.pw-toggle { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); padding: 6px 10px; border-radius: 8px;
+  background: none; color: var(--blue); font-size: 12px; font-weight: 700; }
+.pw-toggle:hover { background: #eaf2f7; }
+.pw-toggle:focus-visible { outline: 3px solid #1265a340; outline-offset: 1px; }
+.panel-sub { margin: -2px 0 0; font-size: 13px; color: var(--muted); }
+
 /* Detail / edit dialog */
-.modal.panel { text-align: left; max-width: 440px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.modal.panel { text-align: left; max-width: 560px; max-height: calc(100vh - 32px); overflow-y: auto; }
 .modal.panel .field { display: block; margin-top: 14px; }
 .modal.panel .hint { margin-top: 10px; }
 .modal.panel .notice { margin-top: 12px; }

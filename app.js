@@ -346,13 +346,14 @@ function renderVerify(token, notice) {
   setWelcome('Verify your identity', 'One more step before you vote.');
   app.innerHTML = `
     <h2>Verify your identity</h2>
-    <p class="sub">Enter your registered cellphone number or email address to proceed.</p>
+    <p class="sub">Enter your registered cellphone number or email address, and your password, to proceed.</p>
     ${steps(2)}
     ${notice ? `<div class="notice error">${escapeHtml(notice)}</div>` : ''}
     <form id="form-verify" autocomplete="off">
       <label class="field" for="identifier">Cellphone number or email address</label>
       <input id="identifier" class="input" autocomplete="off" autocapitalize="none" spellcheck="false"
         placeholder="e.g. 0917 123 4567 or juan@example.com" required>
+      ${passwordField('vpassword', 'Password', 'required').replace('autocomplete="new-password"', 'autocomplete="off"')}
       <div class="notice">&#128274; It must match the details registered for the QR code you scanned.</div>
       <button class="btn full" type="submit">Continue &nbsp;&rarr;</button>
     </form>`;
@@ -363,11 +364,12 @@ function renderVerify(token, notice) {
       const { data, error } = await db.rpc('voter_redeem', {
         p_token: token,
         p_identifier: document.getElementById('identifier').value,
+        p_password: document.getElementById('vpassword').value,
       });
       if (error) throw error;
       if (!data.ok) {
         if (data.reason === 'mismatch') {
-          renderVerify(token, 'That does not match the details registered for this QR code. Please check and try again.');
+          renderVerify(token, 'The email, cellphone number or password does not match the details registered for this QR code. Please check and try again.');
         } else {
           renderQrProblem(data.reason);
         }
@@ -682,6 +684,7 @@ function statusPlan(act, p, present) {
   return {
     start: { title: 'Activate this poll?', text: `"${p.title}" will become Active and open right away to everyone who is present (${present} voter${present === 1 ? '' : 's'} at the moment).`, confirmText: 'Activate', icon: '&#9654;', status: 'open', done: 'Poll is now Active.' },
     reopen: { title: 'Reopen this poll?', text: `"${p.title}" will become Active again. Voters who already voted cannot vote twice.`, confirmText: 'Reopen', icon: '&#8635;', status: 'open', done: 'Poll reopened. It is now Active.' },
+    deactivate: { title: 'Make this poll Not Active?', text: `"${p.title}" will be hidden from voters again and you can edit it. This is only possible because nobody has voted in it yet.`, confirmText: 'Make Not Active', icon: '&#10074;&#10074;', status: 'draft', done: 'Poll is now Not Active.' },
     end: { title: 'Close this poll?', text: `Voters will no longer be able to submit votes for "${p.title}". You can reopen it later.`, confirmText: 'Close poll', icon: '&#9632;', danger: true, status: 'closed', done: 'Poll closed.' },
     cancel: { title: 'Cancel this poll?', text: `"${p.title}" will be voided and hidden from voters. A cancelled poll cannot be reopened or changed.`, confirmText: 'Cancel poll', cancelText: 'Keep poll', icon: '&#10006;', danger: true, status: 'cancelled', done: 'Poll cancelled.' },
   }[act];
@@ -692,8 +695,7 @@ function pollSummary(p) {
     const pos = p.positions[0];
     return `Question &middot; ${escapeHtml(pos.options.map((o) => o.label).join(' / '))}${pos.max_votes > 1 ? ` &middot; up to ${pos.max_votes} answers` : ''}`;
   }
-  const perPosition = p.positions.map((x) =>
-    `${escapeHtml(x.title)} (${x.options.length} candidate${x.options.length === 1 ? '' : 's'})`);
+  const perPosition = p.positions.map((x) => escapeHtml(x.title));
   return `Election &middot; ${perPosition.join(', ')}`;
 }
 
@@ -707,10 +709,10 @@ function pollMenuItems(p) {
     safe = [item('start', 'Activate'), item('edit', 'Edit')];
     risky = [item('cancel', 'Cancel poll', true), item('delete', 'Delete', true)];
   } else if (p.status === 'open') {
-    safe = [item('end', 'Close poll')];
+    safe = [item('end', 'Close poll'), p.voted ? '' : item('deactivate', 'Make Not Active')];
     risky = [item('cancel', 'Cancel poll', true)];
   } else if (p.status === 'closed') {
-    safe = [item('reopen', 'Reopen')];
+    safe = [item('reopen', 'Reopen'), p.voted ? '' : item('deactivate', 'Make Not Active')];
     risky = [item('cancel', 'Cancel poll', true), item('reset', 'Clear votes', true), item('delete', 'Delete', true)];
   } else { // cancelled
     risky = [item('reset', 'Clear votes', true), item('delete', 'Delete', true)];
@@ -722,7 +724,8 @@ function pollMenuItems(p) {
 function dashMenuItems(d) {
   const item = (act, label, danger) =>
     `<button type="button" role="menuitem" class="${danger ? 'danger-item' : ''}" data-act="${act}">${label}</button>`;
-  const main = { draft: item('start', 'Activate'), open: item('end', 'Close poll'), closed: item('reopen', 'Reopen') }[d.status] || '';
+  const main = ({ draft: item('start', 'Activate'), open: item('end', 'Close poll'), closed: item('reopen', 'Reopen') }[d.status] || '')
+    + (d.status !== 'open' && d.status !== 'closed' || d.voted ? '' : item('deactivate', 'Make Not Active'));
   return main + (main ? '<div class="menu-sep" role="separator"></div>' : '') + item('cancel', 'Cancel poll', true);
 }
 
@@ -1284,7 +1287,7 @@ function attendanceChip(a) {
 function attendanceMenu(a) {
   const item = (act, label, danger) =>
     `<button type="button" role="menuitem" class="${danger ? 'danger-item' : ''}" data-act="${act}" data-id="${a.id}">${label}</button>`;
-  const first = item('view', 'View details') + item('edit', 'Edit') +
+  const first = item('view', 'View details') + item('edit', 'Edit') + item('password', 'Change password') +
     (a.revoked ? item('restore', 'Restore access') : a.locked ? item('restore', 'Unlock QR code') : '');
   // Someone who already voted cannot be removed (they could be recorded again and vote twice): revoke instead.
   const risky = [a.revoked ? '' : item('revoke', 'Revoke access', true), a.votes ? '' : item('remove', 'Remove attendance', true)].join('');
@@ -1325,6 +1328,7 @@ function showAttendanceDetail(a, onEdit) {
       ${row('Email', a.email)}
       ${row('Cellphone', a.phone)}
       ${row('Status', status)}
+      ${row('Password', a.has_password ? 'Set' : 'Not set yet')}
       ${row('Recorded', new Date(a.recorded_at).toLocaleString())}
       ${row('Recorded by', a.recorded_by)}
       ${row('Signed in on', `${a.sessions} device${a.sessions === 1 ? '' : 's'}`)}
@@ -1338,17 +1342,123 @@ function showAttendanceDetail(a, onEdit) {
   });
 }
 
+// Display name: first name + middle initial + last name, e.g. "Den Amiel C. Leonardo".
+const displayName = (first, middle, last) =>
+  [first, middle ? `${middle[0].toUpperCase()}.` : '', last].filter(Boolean).join(' ');
+
+// A password input with a Show / Hide button (toggled by the document-level handler below).
+function passwordField(id, label, extra = '') {
+  return `<div><label class="field" for="${id}">${label}</label>
+    <div class="pw-wrap">
+      <input id="${id}" class="input" type="password" autocomplete="new-password" ${extra}>
+      <button type="button" class="pw-toggle" data-pw-toggle="${id}" aria-label="Show ${label.toLowerCase()}" aria-pressed="false">Show</button>
+    </div></div>`;
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-pw-toggle]');
+  if (!btn) return;
+  const input = document.getElementById(btn.dataset.pwToggle);
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  btn.textContent = show ? 'Hide' : 'Show';
+  btn.setAttribute('aria-pressed', String(show));
+  btn.setAttribute('aria-label', `${show ? 'Hide' : 'Show'} ${btn.getAttribute('aria-label').replace(/^(Show|Hide) /, '')}`);
+});
+
+// Fields shared by the attendance form and the edit dialog; p is the id prefix.
+// The edit dialog has no password: it has its own Change password dialog.
+function personFields(p, v = {}, editing = false) {
+  const input = (id, label, value, extra = '') => `
+    <div><label class="field" for="${p}-${id}">${label}</label>
+    <input id="${p}-${id}" class="input" autocomplete="off" value="${escapeHtml(value || '')}" ${extra}></div>`;
+  return `
+    <div class="row3">
+      ${input('first', 'First name', v.first_name, 'placeholder="e.g. Juan"')}
+      ${input('middle', 'Middle name (optional)', v.middle_name)}
+      ${input('last', 'Last name', v.last_name, 'placeholder="e.g. Dela Cruz"')}
+    </div>
+    <label class="field" for="${p}-email">Email address</label>
+    <input id="${p}-email" class="input" type="email" autocomplete="off" autocapitalize="none" spellcheck="false" value="${escapeHtml(v.email || '')}" placeholder="e.g. juan@example.com">
+    <label class="field" for="${p}-phone">Cellphone number</label>
+    <input id="${p}-phone" class="input" type="tel" inputmode="tel" autocomplete="off" value="${escapeHtml(v.phone || '')}" placeholder="e.g. 0917 123 4567">
+    ${editing ? '' : `<div class="row2">
+      ${passwordField(`${p}-password`, 'Password')}
+      ${passwordField(`${p}-confirm`, 'Confirm password')}
+    </div>
+    <div class="hint">At least 8 characters. Tell the voter their password: they type it, with their email or cellphone number, after scanning the QR code.</div>`}`;
+}
+
+// Reads and checks personFields (the server repeats every check). Throws a message for staff.
+function readPerson(root, p, editing = false) {
+  const get = (id) => root.querySelector(`#${p}-${id}`).value;
+  const v = {
+    first: get('first').trim(), middle: get('middle').trim(), last: get('last').trim(),
+    email: get('email').trim(), phone: get('phone').trim(), password: editing ? '' : get('password'),
+  };
+  if (!v.first) throw new Error('Enter the first name.');
+  if (!v.last) throw new Error('Enter the last name.');
+  if (!v.email && !v.phone) throw new Error('Enter an email address or a cellphone number.');
+  if (v.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email)) throw new Error('That email address does not look right.');
+  if (v.phone && v.phone.replace(/\D/g, '').length < 10) throw new Error('Enter the full cellphone number (at least 10 digits).');
+  if (!editing) checkPasswords(v.password, get('confirm'));
+  return v;
+}
+
+function checkPasswords(password, confirm) {
+  if (password.length < 8) throw new Error('The password must be at least 8 characters.');
+  if (password !== confirm) throw new Error('The passwords do not match.');
+}
+
+// Separate from Edit: sets a new password for a voter (the old one stops working, any lock is cleared).
+function showPasswordDialog(a, onSaved) {
+  const { overlay, close } = openPanel(`
+    <h3 id="panel-title">Change password</h3>
+    <p class="panel-sub">${escapeHtml(a.name || 'This person')}</p>
+    <form id="att-pw" autocomplete="off" novalidate>
+      <div class="row2">
+        ${passwordField('pw-new', 'New password')}
+        ${passwordField('pw-confirm', 'Confirm password')}
+      </div>
+      <div class="hint">At least 8 characters. The old password stops working right away. Tell the voter the new one.</div>
+      <div class="notice error" id="pw-error" hidden></div>
+      <div class="modal-actions">
+        <button type="button" class="btn outline" data-close>Cancel</button>
+        <button type="submit" class="btn">Change password</button>
+      </div>
+    </form>`);
+  const err = overlay.querySelector('#pw-error');
+  overlay.querySelector('#att-pw').onsubmit = (e) => {
+    e.preventDefault();
+    busy(e.submitter, async () => {
+      err.hidden = true;
+      try {
+        const password = overlay.querySelector('#pw-new').value;
+        checkPasswords(password, overlay.querySelector('#pw-confirm').value);
+        const ok = await confirmDialog({
+          title: 'Change password?', text: `${a.name || 'This person'} must use the new password to sign in. The old one stops working.`,
+          confirmText: 'Change password', icon: '&#128273;',
+        });
+        if (!ok) return;
+        await rpc('admin_set_attendance_password', { p_id: a.id, p_password: password });
+      } catch (ex) {
+        err.textContent = ex.message || String(ex);
+        err.hidden = false;
+        return;
+      }
+      close();
+      toast('Password changed.');
+      await onSaved();
+    });
+  };
+}
+
 function showAttendanceEdit(a, onSaved) {
   const { overlay, close } = openPanel(`
     <h3 id="panel-title">Edit details</h3>
     <form id="att-edit" autocomplete="off" novalidate>
-      <label class="field" for="ed-name">Full name</label>
-      <input id="ed-name" class="input" autocomplete="off" value="${escapeHtml(a.name || '')}">
-      <label class="field" for="ed-email">Email address</label>
-      <input id="ed-email" class="input" type="email" autocomplete="off" autocapitalize="none" spellcheck="false" value="${escapeHtml(a.email || '')}">
-      <label class="field" for="ed-phone">Cellphone number</label>
-      <input id="ed-phone" class="input" type="tel" inputmode="tel" autocomplete="off" value="${escapeHtml(a.phone || '')}">
-      <div class="hint">The voter types one of these to sign in, so keep at least one. Their QR code stays the same.</div>
+      ${personFields('ed', a, true)}
+      <div class="hint">The voter types one of these, with their password, to sign in. Their QR code and password stay the same: use Change password in the menu to set a new one.</div>
       <div class="notice error" id="ed-error" hidden></div>
       <div class="modal-actions">
         <button type="button" class="btn outline" data-close>Cancel</button>
@@ -1357,24 +1467,23 @@ function showAttendanceEdit(a, onSaved) {
     </form>`);
   const form = overlay.querySelector('#att-edit');
   const err = overlay.querySelector('#ed-error');
-  const val = (id) => overlay.querySelector('#' + id).value.trim();
   form.onsubmit = (e) => {
     e.preventDefault();
     busy(e.submitter, async () => {
       err.hidden = true;
-      const name = val('ed-name'), email = val('ed-email'), phone = val('ed-phone');
       try {
-        if (!name) throw new Error('Enter the full name.');
-        if (!email && !phone) throw new Error('Enter an email address or a cellphone number.');
-        if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('That email address does not look right.');
-        if (phone && phone.replace(/\D/g, '').length < 10) throw new Error('Enter the full cellphone number (at least 10 digits).');
-        if (name === (a.name || '') && email === (a.email || '') && phone === (a.phone || '')) return close();
+        const v = readPerson(overlay, 'ed', true);
+        if (v.first === (a.first_name || '') && v.middle === (a.middle_name || '') && v.last === (a.last_name || '')
+          && v.email === (a.email || '') && v.phone === (a.phone || '')) return close();
         const ok = await confirmDialog({
           title: 'Save changes?', text: `The details for ${a.name || 'this person'} will be updated.`,
           confirmText: 'Save changes', icon: '&#10003;',
         });
         if (!ok) return;
-        const res = await rpc('admin_update_attendance', { p_id: a.id, p_name: name, p_email: email, p_phone: phone });
+        const res = await rpc('admin_update_attendance', {
+          p_id: a.id, p_first: v.first, p_middle: v.middle, p_last: v.last,
+          p_email: v.email, p_phone: v.phone,
+        });
         if (!res.ok) throw new Error('Already recorded. Email or cellphone number already registered.');
       } catch (ex) {
         err.textContent = ex.message || String(ex);
@@ -1435,13 +1544,8 @@ async function loadAttendance() {
 
     <form id="att-form" class="att-form" autocomplete="off" novalidate>
       <h3>Attendance form</h3>
-      <label class="field" for="att-name">Full name</label>
-      <input id="att-name" class="input" autocomplete="off" placeholder="e.g. Juan Dela Cruz" required>
-      <label class="field" for="att-email">Email address</label>
-      <input id="att-email" class="input" type="email" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="e.g. juan@example.com">
-      <label class="field" for="att-phone">Cellphone number</label>
-      <input id="att-phone" class="input" type="tel" inputmode="tel" autocomplete="off" placeholder="e.g. 0917 123 4567">
-      <div class="hint">Enter the email address or the cellphone number, or both. The voter types one of them to sign in after scanning, so it must be correct. The only check is that nobody is recorded twice.</div>
+      ${personFields('att')}
+      <div class="hint">Enter the email address or the cellphone number, or both. The voter types one of them, with the password, to sign in after scanning, so it must be correct. The only other check is that nobody is recorded twice.</div>
       <button class="btn full" type="submit">Record attendance &nbsp;&rarr;</button>
     </form>
     <div id="att-results"></div>
@@ -1470,23 +1574,20 @@ async function loadAttendance() {
     e.preventDefault();
     busy(e.submitter, async () => {
       document.getElementById('att-results').innerHTML = '';
-      const name = val('att-name').trim();
-      const email = val('att-email').trim();
-      const phone = val('att-phone').trim();
-      // Checks the server repeats; done here so staff get a message without a round trip.
-      if (!name) throw new Error('Enter the full name.');
-      if (!email && !phone) throw new Error('Enter an email address or a cellphone number.');
-      if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('That email address does not look right.');
-      if (phone && phone.replace(/\D/g, '').length < 10) throw new Error('Enter the full cellphone number (at least 10 digits).');
+      const v = readPerson(document, 'att');
+      const name = displayName(v.first, v.middle, v.last);
 
       const ok = await confirmDialog({
         title: 'Record attendance?',
-        text: `${name} (${[phone, email].filter(Boolean).join(' · ')}) will be recorded as present and a QR code will be created for them to scan.`,
+        text: `${name} (${[v.phone, v.email].filter(Boolean).join(' · ')}) will be recorded as present and a QR code will be created for them to scan.`,
         confirmText: 'Record attendance', icon: '&#10003;',
       });
       if (!ok) return;
 
-      const res = await rpc('admin_record_attendance', { p_name: name, p_email: email, p_phone: phone });
+      const res = await rpc('admin_record_attendance', {
+        p_first: v.first, p_middle: v.middle, p_last: v.last,
+        p_email: v.email, p_phone: v.phone, p_password: v.password,
+      });
       if (!res.ok) {
         paintDuplicate(res.existing);
         return;
@@ -1518,6 +1619,7 @@ async function loadAttendance() {
     const edit = (x) => showAttendanceEdit(x, refresh);
     if (btn.dataset.act === 'view') return showAttendanceDetail(a, edit);
     if (btn.dataset.act === 'edit') return edit(a);
+    if (btn.dataset.act === 'password') return showPasswordDialog(a, refresh);
     const plans = {
       revoke: { title: `Revoke access for ${who}?`, text: 'They will be logged out right away on every device and cannot vote until you restore their access.', confirmText: 'Revoke access', icon: '&#9888;', danger: true,
         run: () => rpc('admin_set_attendance_access', { p_id: a.id, p_active: false }), done: 'Access revoked.' },

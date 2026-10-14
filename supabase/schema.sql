@@ -48,6 +48,14 @@ create table if not exists public.attendance (
 alter table public.attendance add column if not exists name  text;
 alter table public.attendance add column if not exists email text;
 alter table public.attendance add column if not exists phone text;
+-- name is the full display name, built from the three parts below (middle name is optional).
+-- password_hash is bcrypt (pgcrypto); the voter types the password at the Verify step. Records made
+-- before passwords existed have none and keep verifying with the email or number alone until an
+-- admin sets one (Edit).
+alter table public.attendance add column if not exists first_name    text;
+alter table public.attendance add column if not exists middle_name   text;
+alter table public.attendance add column if not exists last_name     text;
+alter table public.attendance add column if not exists password_hash text;
 -- Normalised copies used for duplicate checks and for matching what the voter types: the lower-cased
 -- email, and the last 10 digits of the phone (so 09171234567, +63 917 123 4567 and 917-123-4567 match).
 alter table public.attendance add column if not exists email_key text
@@ -205,6 +213,12 @@ begin
   drop table public.allowed_voters;
 end $$;
 
+-- Older rows only have a full name: split it at the last space so Edit has something to show.
+update public.attendance
+   set first_name = case when btrim(name) ~ '\s' then regexp_replace(btrim(name), '\s+\S+$', '') else btrim(name) end,
+       last_name  = case when btrim(name) ~ '\s' then substring(btrim(name) from '\S+$') else null end
+ where first_name is null and nullif(btrim(coalesce(name, '')), '') is not null;
+
 -- Duplicate protection (the only rule on the attendance form) and "has a way to verify".
 create unique index if not exists attendance_email_key on public.attendance (email_key) where email_key is not null;
 create unique index if not exists attendance_phone_key on public.attendance (phone_key) where phone_key is not null;
@@ -234,6 +248,10 @@ drop function if exists public.my_history();
 drop function if exists public.admin_search_voters(text);
 drop function if exists public.admin_find_voters(text, text, text);
 drop function if exists public.admin_record_attendance(bigint);
+drop function if exists public.admin_record_attendance(text, text, text);
+drop function if exists public.admin_update_attendance(bigint, text, text, text);
+drop function if exists public.admin_update_attendance(bigint, text, text, text, text, text, text);
+drop function if exists public.voter_redeem(text, text);
 
 -- ---------------------------------------------------------------------------
 -- Admin identity (Supabase Auth: email + password)
@@ -270,9 +288,9 @@ as $$
 $$;
 
 -- Step 2 of the voter flow. Returns { ok: true, session, name } or { ok: false, reason }.
--- reason: invalid (unknown QR) | revoked | locked (too many wrong tries) | mismatch (wrong email/number).
+-- reason: invalid (unknown QR) | revoked | locked (too many wrong tries) | mismatch (wrong email/number or password).
 -- It returns instead of raising so the wrong-try counter is kept.
-create or replace function public.voter_redeem(p_token text, p_identifier text)
+create or replace function public.voter_redeem(p_token text, p_identifier text, p_password text)
 returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
@@ -295,6 +313,12 @@ begin
   else
     v_key := nullif(right(regexp_replace(v_ident, '\D', '', 'g'), 10), '');
     v_match := v_key is not null and v_key = v_att.phone_key;
+  end if;
+
+  -- the password must match too (rows made before passwords existed have none: email/number only)
+  if v_att.password_hash is not null then
+    v_match := coalesce(v_match, false)
+      and extensions.crypt(coalesce(p_password, ''), v_att.password_hash) = v_att.password_hash;
   end if;
 
   if not coalesce(v_match, false) then
@@ -459,12 +483,16 @@ $$;
 -- cellphone number that is already recorded. Returns
 --   { ok: true,  attendance: { id, name, email, phone, qr_token } }
 --   { ok: false, reason: 'duplicate', existing: { id, name, email, phone, matched } }
-create or replace function public.admin_record_attendance(p_name text, p_email text, p_phone text)
+create or replace function public.admin_record_attendance(
+  p_first text, p_middle text, p_last text, p_email text, p_phone text, p_password text)
 returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
 declare
-  v_name   text := btrim(coalesce(p_name, ''));
+  v_first  text := btrim(coalesce(p_first, ''));
+  v_middle text := nullif(btrim(coalesce(p_middle, '')), '');
+  v_last   text := btrim(coalesce(p_last, ''));
+  v_name   text;
   v_email  text := nullif(btrim(coalesce(p_email, '')), '');
   v_digits text := regexp_replace(coalesce(p_phone, ''), '\D', '', 'g');
   v_ekey   text := nullif(lower(btrim(coalesce(p_email, ''))), '');
@@ -473,7 +501,10 @@ declare
   v_att    public.attendance;
 begin
   if not public.is_admin() then raise exception 'Admins only'; end if;
-  if v_name = '' then raise exception 'Enter the full name.'; end if;
+  if v_first = '' then raise exception 'Enter the first name.'; end if;
+  if v_last = '' then raise exception 'Enter the last name.'; end if;
+  -- display name: first name + middle initial + last name, e.g. Den Amiel C. Leonardo
+  v_name := concat_ws(' ', v_first, case when v_middle is not null then upper(left(v_middle, 1)) || '.' end, v_last);
   if v_ekey is null and v_pkey is null then raise exception 'Enter an email address or a cellphone number.'; end if;
   if v_ekey is not null and v_ekey !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then
     raise exception 'That email address does not look right.';
@@ -481,14 +512,16 @@ begin
   if v_pkey is not null and length(v_digits) < 10 then
     raise exception 'Enter the full cellphone number (at least 10 digits).';
   end if;
+  if length(coalesce(p_password, '')) < 8 then raise exception 'The password must be at least 8 characters.'; end if;
 
   begin
     select * into v_dup from public.attendance
      where (v_ekey is not null and email_key = v_ekey) or (v_pkey is not null and phone_key = v_pkey)
      order by id limit 1;
     if not found then
-      insert into public.attendance (name, email, phone, recorded_by)
-        values (v_name, v_email, nullif(btrim(coalesce(p_phone, '')), ''), lower(auth.jwt() ->> 'email'))
+      insert into public.attendance (name, first_name, middle_name, last_name, email, phone, password_hash, recorded_by)
+        values (v_name, v_first, v_middle, v_last, v_email, nullif(btrim(coalesce(p_phone, '')), ''),
+                extensions.crypt(p_password, extensions.gen_salt('bf')), lower(auth.jwt() ->> 'email'))
         returning * into v_att;
       return jsonb_build_object('ok', true, 'attendance', jsonb_build_object(
         'id', v_att.id, 'name', v_att.name, 'email', v_att.email, 'phone', v_att.phone, 'qr_token', v_att.qr_token));
@@ -521,7 +554,8 @@ begin
     'present', (select count(*) from public.attendance where revoked_at is null),
     'revoked', (select count(*) from public.attendance where revoked_at is not null),
     'attendees', (select coalesce(jsonb_agg(jsonb_build_object(
-        'id', t.id, 'name', t.name, 'email', t.email, 'phone', t.phone,
+        'id', t.id, 'name', t.name, 'first_name', t.first_name, 'middle_name', t.middle_name, 'last_name', t.last_name,
+        'email', t.email, 'phone', t.phone, 'has_password', t.password_hash is not null,
         'qr_token', t.qr_token, 'recorded_at', t.recorded_at, 'recorded_by', t.recorded_by,
         'revoked', t.revoked_at is not null,
         'locked', t.locked_until is not null and t.locked_until > now(),
@@ -533,21 +567,25 @@ begin
 end;
 $$;
 
--- Correct a recorded person's name, email or cellphone number. The QR code, access state and any
+-- Correct a recorded person's name, email or cellphone number. The QR code, password, access state and any
 -- votes stay as they are. Returns { ok: true } or { ok: false, reason: 'duplicate' } when another
 -- person already has that email or cellphone number.
-create or replace function public.admin_update_attendance(p_id bigint, p_name text, p_email text, p_phone text)
+create or replace function public.admin_update_attendance(
+  p_id bigint, p_first text, p_middle text, p_last text, p_email text, p_phone text)
 returns jsonb
 language plpgsql security definer set search_path = ''
 as $$
 declare
-  v_name   text := btrim(coalesce(p_name, ''));
+  v_first  text := btrim(coalesce(p_first, ''));
+  v_middle text := nullif(btrim(coalesce(p_middle, '')), '');
+  v_last   text := btrim(coalesce(p_last, ''));
   v_digits text := regexp_replace(coalesce(p_phone, ''), '\D', '', 'g');
   v_ekey   text := nullif(lower(btrim(coalesce(p_email, ''))), '');
   v_pkey   text := nullif(right(regexp_replace(coalesce(p_phone, ''), '\D', '', 'g'), 10), '');
 begin
   if not public.is_admin() then raise exception 'Admins only'; end if;
-  if v_name = '' then raise exception 'Enter the full name.'; end if;
+  if v_first = '' then raise exception 'Enter the first name.'; end if;
+  if v_last = '' then raise exception 'Enter the last name.'; end if;
   if v_ekey is null and v_pkey is null then raise exception 'Enter an email address or a cellphone number.'; end if;
   if v_ekey is not null and v_ekey !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then
     raise exception 'That email address does not look right.';
@@ -563,7 +601,8 @@ begin
   end if;
   begin
     update public.attendance
-       set name = v_name,
+       set name = concat_ws(' ', v_first, case when v_middle is not null then upper(left(v_middle, 1)) || '.' end, v_last),
+           first_name = v_first, middle_name = v_middle, last_name = v_last,
            email = nullif(btrim(coalesce(p_email, '')), ''),
            phone = nullif(btrim(coalesce(p_phone, '')), '')
      where id = p_id;
@@ -571,6 +610,23 @@ begin
     return jsonb_build_object('ok', false, 'reason', 'duplicate');
   end;
   return jsonb_build_object('ok', true);
+end;
+$$;
+
+-- Set a new password for a recorded person (also clears any lock). The old password stops working.
+create or replace function public.admin_set_attendance_password(p_id bigint, p_password text)
+returns void
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if not public.is_admin() then raise exception 'Admins only'; end if;
+  if length(coalesce(p_password, '')) < 8 then raise exception 'The password must be at least 8 characters.'; end if;
+  perform 1 from public.attendance where id = p_id for update;
+  if not found then raise exception 'Attendance record not found'; end if;
+  update public.attendance
+     set password_hash = extensions.crypt(p_password, extensions.gen_salt('bf')),
+         failed_attempts = 0, locked_until = null
+   where id = p_id;
 end;
 $$;
 
@@ -746,6 +802,7 @@ $$;
 --   Not Active (draft) -> Active (open)       activate
 --   Active (open)      -> Closed              close
 --   Closed             -> Active (open)       reopen
+--   Active or Closed   -> Not Active (draft)  only while nobody has voted in it yet
 --   any except Cancelled -> Cancelled         cancel (voids the poll; final)
 create or replace function public.admin_set_poll_status(p_id int, p_status text)
 returns void
@@ -765,6 +822,12 @@ begin
   elsif p_status = 'closed' then
     if v_cur <> 'open' then raise exception 'Only an Active poll can be closed'; end if;
     update public.polls set status = 'closed' where id = p_id;
+  elsif p_status = 'draft' then
+    if v_cur = 'draft' then return; end if;
+    if exists (select 1 from public.votes_cast where poll_id = p_id) then
+      raise exception 'Votes have already been cast, so this poll cannot be made Not Active. Close it instead.';
+    end if;
+    update public.polls set status = 'draft' where id = p_id;
   elsif p_status = 'cancelled' then
     update public.polls set status = 'cancelled' where id = p_id;
   else
@@ -842,14 +905,15 @@ $$;
 -- ---------------------------------------------------------------------------
 revoke execute on all functions in schema public from public, anon, authenticated;
 grant execute on function
-  public.voter_redeem(text, text), public.voter_me(text), public.voter_sign_out(text),
+  public.voter_redeem(text, text, text), public.voter_me(text), public.voter_sign_out(text),
   public.get_active_polls(text), public.cast_vote(text, int, int[])
   to anon, authenticated;
 grant execute on function
   public.is_admin(), public.my_status(),
-  public.admin_record_attendance(text, text, text),
+  public.admin_record_attendance(text, text, text, text, text, text),
   public.admin_list_attendance(), public.admin_set_attendance_access(bigint, boolean),
-  public.admin_remove_attendance(bigint), public.admin_update_attendance(bigint, text, text, text),
+  public.admin_remove_attendance(bigint), public.admin_update_attendance(bigint, text, text, text, text, text),
+  public.admin_set_attendance_password(bigint, text),
   public.admin_list_polls(), public.admin_save_poll(jsonb),
   public.admin_set_poll_status(int, text), public.admin_delete_poll(int),
   public.admin_reset_poll(int), public.admin_poll_dashboard(int)
