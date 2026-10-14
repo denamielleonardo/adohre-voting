@@ -68,5 +68,5 @@ Admins are always kept. (The very first single-election layout is replaced and i
 - Admin passwords are stored hashed by Supabase Auth. Supabase limits repeated sign-in attempts. Use a long, unique password.
 - The QR token is a 64-character random secret; a session token is another 64-character secret, stored only as a hash. A QR alone is not enough: the typed email or number must match the person it was issued to, and 5 wrong tries lock it for 15 minutes.
 - Treat a displayed or printed QR like a key to that member's vote: do not post it. If one is exposed, **Revoke access** or **Remove attendance** and record attendance again for a fresh code.
-- Up to 5 devices can be signed in per member at once; the oldest are dropped.
+- Up to 5 devices can be signed in per member at once; the oldest are dropped. A voter's session lasts 24 hours from verifying: after that they scan the QR code and verify again.
 - Free Supabase projects pause after a week idle; restore a day or two before voting.

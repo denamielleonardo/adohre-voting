@@ -331,7 +331,7 @@ function renderAccessEnded() {
   setWelcome('Access ended', 'Your voting access is no longer active on this device.');
   app.innerHTML = `<div class="center">
     <h2>Your access has ended</h2>
-    <div class="notice warn">An administrator ended your voting access, or you were signed out. Please see the registration desk if you still need to vote.</div>
+    <div class="notice warn">Your 24-hour session ended, an administrator ended your voting access, or you were signed out. Scan your QR code and verify again, or see the registration desk if you still need to vote.</div>
     <div class="btnrow" style="justify-content:center"><button class="btn" id="ended-ok">OK</button></div>
   </div>`;
   document.getElementById('ended-ok').onclick = renderScan;

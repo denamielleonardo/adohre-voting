@@ -275,8 +275,8 @@ $$;
 -- ---------------------------------------------------------------------------
 -- Voter identity (QR + the email/phone staff entered -> session token)
 -- ---------------------------------------------------------------------------
--- Internal: the voter (attendance id) behind a session token, or null if the token is unknown or the
--- voter's access was revoked.
+-- Internal: the voter (attendance id) behind a session token, or null if the token is unknown, the
+-- voter's access was revoked, or the session is older than 24 hours (they scan and verify again).
 create or replace function public.session_voter(p_session text)
 returns bigint
 language sql stable security definer set search_path = ''
@@ -284,7 +284,8 @@ as $$
   select s.voter_id
     from public.voter_sessions s
     join public.attendance a on a.id = s.voter_id and a.revoked_at is null
-   where s.token_hash = encode(sha256(convert_to(coalesce(p_session, ''), 'utf8')), 'hex');
+   where s.token_hash = encode(sha256(convert_to(coalesce(p_session, ''), 'utf8')), 'hex')
+     and s.created_at > now() - interval '24 hours';
 $$;
 
 -- Step 2 of the voter flow. Returns { ok: true, session, name } or { ok: false, reason }.
@@ -330,6 +331,9 @@ begin
   end if;
 
   update public.attendance set failed_attempts = 0, locked_until = null where id = v_att.id;
+
+  -- sessions last 24 hours: tidy up expired ones whenever someone signs in
+  delete from public.voter_sessions where created_at <= now() - interval '24 hours';
 
   v_session := replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
   insert into public.voter_sessions (token_hash, voter_id)
@@ -559,7 +563,8 @@ begin
         'qr_token', t.qr_token, 'recorded_at', t.recorded_at, 'recorded_by', t.recorded_by,
         'revoked', t.revoked_at is not null,
         'locked', t.locked_until is not null and t.locked_until > now(),
-        'sessions', (select count(*) from public.voter_sessions s where s.voter_id = t.id),
+        'sessions', (select count(*) from public.voter_sessions s
+                      where s.voter_id = t.id and s.created_at > now() - interval '24 hours'),
         'votes', (select count(*) from public.votes_cast v where v.voter_id = t.id)
       ) order by t.recorded_at desc), '[]'::jsonb)
       from public.attendance t)
