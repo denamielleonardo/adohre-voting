@@ -238,12 +238,82 @@ function renderScan() {
     <h2>Welcome to ADOHRE</h2>
     <p class="sub">To vote, first record your attendance at the registration desk. You will be shown a QR code to scan with your phone.</p>
     ${steps(1)}
-    <div class="scanbox">
+    <button type="button" class="scanbox" id="scan-open">
       <div class="scanicon" aria-hidden="true">&#9638;</div>
-      <div><b>Scan your QR code</b><span>Use your phone's camera. It opens this page with your voting access.</span></div>
-    </div>
+      <div><b>Scan your QR code</b><span>Tap here to open your camera and point it at your QR code.</span></div>
+    </button>
     <div class="notice">&#128274; Your attendance must be recorded first. Already scanned? Ask the registration desk to show your code again.</div>
     <div class="hint" style="text-align:center;margin-top:18px">Administrator? <a href="#admin">Sign in here</a></div>`;
+  document.getElementById('scan-open').onclick = openScanner;
+}
+
+// Opens the device camera and reads the QR code on screen. Only the secret token (?q=) is taken
+// from what is scanned; it then goes through the normal Verify step.
+async function openScanner() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return toast('This browser cannot open the camera here. Use your phone\'s camera app to scan the code.');
+  }
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal scanner" role="dialog" aria-modal="true" aria-labelledby="scan-title">
+      <h3 id="scan-title">Scan your QR code</h3>
+      <div class="scan-view"><video playsinline muted></video><i aria-hidden="true"></i></div>
+      <p id="scan-msg">Point the camera at your QR code.</p>
+      <div class="modal-actions"><button type="button" class="btn outline" data-scan="cancel">Cancel</button></div>
+    </div>`;
+  const video = overlay.querySelector('video');
+  let stream = null;
+  let stopped = false;
+  const close = () => {
+    stopped = true;
+    document.removeEventListener('keydown', onKey, true);
+    stream?.getTracks().forEach((t) => t.stop());
+    overlay.remove();
+  };
+  const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  overlay.onclick = (e) => { if (e.target === overlay || e.target.closest('[data-scan]')) close(); };
+  document.addEventListener('keydown', onKey, true);
+  document.body.append(overlay);
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+  } catch {
+    close();
+    return toast('Camera access was blocked. Allow the camera in your browser, or use your phone\'s camera app.');
+  }
+  if (stopped) return stream.getTracks().forEach((t) => t.stop());
+  video.srcObject = stream;
+  await video.play().catch(() => {});
+
+  const detector = 'BarcodeDetector' in window ? new BarcodeDetector({ formats: ['qr_code'] }) : null;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const read = async () => {
+    if (detector) return (await detector.detect(video))[0]?.rawValue || '';
+    if (!window.jsQR) return '';
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    return jsQR(ctx.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height)?.data || '';
+  };
+  const tokenOf = (text) => {
+    try { return new URL(text).searchParams.get('q') || ''; } catch { return ''; }
+  };
+  while (!stopped) {
+    await new Promise((r) => setTimeout(r, 250));
+    if (stopped || !video.videoWidth) continue;
+    let text = '';
+    try { text = await read(); } catch { /* try the next frame */ }
+    if (!text) continue;
+    const token = tokenOf(text);
+    if (/^[0-9a-f]{64}$/i.test(token)) {
+      close();
+      history.replaceState(null, '', `${location.pathname}?q=${token}`);
+      return busy(null, route);
+    }
+    overlay.querySelector('#scan-msg').textContent = 'That is not an ADOHRE voting QR code. Try again.';
+  }
 }
 
 function renderQrProblem(reason) {
@@ -533,9 +603,18 @@ function renderReview(poll) {
       });
       if (!sure) return;
       const ids = poll.positions.flatMap((pos) => selected[pos.id] || []);
+      // Blocks the screen until the server answers, so nobody taps again or leaves mid-submit.
+      const wait = document.createElement('div');
+      wait.className = 'modal-overlay';
+      wait.innerHTML = `<div class="modal" role="alertdialog" aria-modal="true" aria-live="assertive" aria-labelledby="wait-title">
+        <div class="spinner" aria-hidden="true"></div>
+        <h3 id="wait-title">Submitting your vote</h3>
+        <p>This may take a while. Please do not close or refresh this page.</p></div>`;
+      document.body.append(wait);
       try {
         await vrpc('cast_vote', { p_poll_id: poll.id, p_option_ids: ids });
       } catch (err) {
+        wait.remove();
         // The poll was ended, or the vote already counted: resync with the server.
         if (/not open|already voted/i.test(err.message || '')) {
           toast(err.message);
@@ -545,6 +624,7 @@ function renderReview(poll) {
         }
         throw err;
       }
+      wait.remove();
       selected = {};
       renderDone(poll);
     });
@@ -1475,7 +1555,9 @@ function refreshChrome() {
   document.getElementById('nav-admin').hidden = !isAdmin;
   document.getElementById('nav-attendance').hidden = !isAdmin;
   document.getElementById('signout').hidden = adminView ? !isAdmin : !getVoterSession();
-  document.getElementById('session-email').textContent = adminView ? adminEmail : voterName;
+  const who = document.getElementById('session-email');
+  who.textContent = adminView ? adminEmail : voterName;
+  who.hidden = !who.textContent;
 }
 
 // Is a Supabase (email-code) session an administrator? Leftover sessions from the old email-code
