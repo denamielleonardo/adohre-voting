@@ -325,7 +325,12 @@ button.scanbox:focus-visible { outline: 3px solid #1265a340; outline-offset: 2px
 .row3, .row2 { display: grid; gap: 12px; }
 .row3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .row2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-@media (max-width: 480px) { .row3 { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) {
+  .row3, .row2 { gap: 8px; }
+  .row3 .field, .row2 .field { font-size: 12px; }
+  .row3 .input { padding-left: 10px; padding-right: 10px; }
+  .att-form { padding: 6px 12px 20px; }
+}
 
 /* Password fields with a Show / Hide button */
 .pw-wrap { position: relative; }

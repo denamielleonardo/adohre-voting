@@ -193,8 +193,7 @@ function renderEmail() {
     <form id="form-admin">
       <label class="field" for="email">Administrator email address</label>
       <input id="email" class="input" type="email" autocomplete="username" placeholder="e.g. admin@example.com" required>
-      <label class="field" for="password">Password</label>
-      <input id="password" class="input" type="password" autocomplete="current-password" required>
+      ${passwordField('password', 'Password', 'required').replace('autocomplete="new-password"', 'autocomplete="current-password"')}
       <div class="notice">&#128274; Only registered administrators can sign in here.</div>
       <button class="btn full" type="submit">Sign in &nbsp;&rarr;</button>
     </form>
@@ -1374,9 +1373,9 @@ function personFields(p, v = {}, editing = false) {
     <input id="${p}-${id}" class="input" autocomplete="off" value="${escapeHtml(value || '')}" ${extra}></div>`;
   return `
     <div class="row3">
-      ${input('first', 'First name', v.first_name, 'placeholder="e.g. Juan"')}
-      ${input('middle', 'Middle name (optional)', v.middle_name)}
-      ${input('last', 'Last name', v.last_name, 'placeholder="e.g. Dela Cruz"')}
+      ${input('first', 'First name', v.first_name, 'placeholder="Juan"')}
+      ${input('middle', 'Middle name', v.middle_name, 'placeholder="Optional"')}
+      ${input('last', 'Last name', v.last_name, 'placeholder="Dela Cruz"')}
     </div>
     <label class="field" for="${p}-email">Email address</label>
     <input id="${p}-email" class="input" type="email" autocomplete="off" autocapitalize="none" spellcheck="false" value="${escapeHtml(v.email || '')}" placeholder="e.g. juan@example.com">
